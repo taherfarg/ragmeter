@@ -1,0 +1,17 @@
+# Thresholds a run must clear to be allowed to ship.
+# Quality rules use max_drop and are compared per question; cost rules use
+# max_increase_pct and are compared on an aggregate.
+min_samples: 3
+fail_on_missing: true
+
+metrics:
+  recall@3:
+    max_drop: 0.02
+  ndcg@3:
+    max_drop: 0.03
+  cost_usd:
+    stat: mean
+    max_increase_pct: 20
+  latency_ms:
+    stat: p95
+    max_increase_pct: 25
