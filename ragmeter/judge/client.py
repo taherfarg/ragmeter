@@ -38,6 +38,14 @@ class JudgeError(RuntimeError):
     """The judge could not produce a usable answer."""
 
 
+def _as_status(value) -> int | None:
+    """Coerce an error code to an int. OpenRouter sends these as int or str."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def cache_key(model: str, prompt_version: str, prompt: str) -> str:
     digest = hashlib.sha256()
     digest.update(f"{model}|{prompt_version}|{prompt}".encode())
@@ -142,11 +150,15 @@ class JudgeClient:
                 last_error = f"transport error: {exc}"
             else:
                 if response.status_code == 200:
-                    return self._content_of(response.json())
-                last_error = f"{response.status_code}: {response.text[:200]}"
-                if response.status_code not in RETRYABLE_STATUS:
-                    raise JudgeError(f"OpenRouter returned {last_error}")
-                retry_after = response.headers.get("Retry-After")
+                    outcome, last_error = self._read_ok_response(response)
+                    if outcome is not None:
+                        return outcome
+                    retry_after = response.headers.get("Retry-After")
+                else:
+                    last_error = f"{response.status_code}: {response.text[:200]}"
+                    if response.status_code not in RETRYABLE_STATUS:
+                        raise JudgeError(f"OpenRouter returned {last_error}")
+                    retry_after = response.headers.get("Retry-After")
 
             if attempt == self.max_attempts:
                 break
@@ -155,6 +167,32 @@ class JudgeClient:
         raise JudgeError(
             f"judge failed after {self.max_attempts} attempts; last error {last_error}"
         )
+
+    def _read_ok_response(self, response: httpx.Response) -> tuple[str | None, str]:
+        """Interpret an HTTP 200. Returns (content, error); content is None to retry.
+
+        OpenRouter reports upstream provider failures as HTTP 200 with the real
+        status buried in an `error` object -- observed live as a 502 from the
+        model provider arriving as a 200. Anything that trusts status_code alone
+        reads those as successes and never retries them.
+        """
+        try:
+            body = response.json()
+        except ValueError:
+            # A 200 that is not JSON is a proxy or gateway hiccup. Worth retrying.
+            return None, f"non-JSON body: {response.text[:200]}"
+
+        error = body.get("error") if isinstance(body, dict) else None
+        if error is None:
+            return self._content_of(body), ""
+
+        message = error.get("message") if isinstance(error, dict) else error
+        code = _as_status(error.get("code") if isinstance(error, dict) else None)
+        described = f"upstream {code}: {message}"
+        if code not in RETRYABLE_STATUS:
+            # No code, or a permanent one: retrying only delays the real message.
+            raise JudgeError(f"OpenRouter returned {described}")
+        return None, described
 
     @staticmethod
     def _content_of(body: dict) -> str:

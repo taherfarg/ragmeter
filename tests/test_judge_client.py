@@ -114,6 +114,69 @@ def test_client_error_is_not_retried():
     assert route.call_count == 1
 
 
+def upstream_error(code, message="Upstream error from Nvidia: Internal server error"):
+    """OpenRouter reports upstream failures as HTTP 200 with an error body.
+
+    Observed live on 2026-08-17. The real status code is only in the body, so
+    anything that inspects response.status_code alone sees a success.
+    """
+    body = {"error": {"message": message}}
+    if code is not None:
+        body["error"]["code"] = code
+    return httpx.Response(200, json=body)
+
+
+@respx.mock
+def test_retryable_error_inside_a_200_body_is_retried():
+    route = respx.post(CHAT_URL).mock(
+        side_effect=[upstream_error(502), upstream_error(502), reply('{"score": 2}')])
+    assert make_client().ask("prompt") == {"score": 2}
+    assert route.call_count == 3
+
+
+@respx.mock
+def test_rate_limit_inside_a_200_body_is_retried():
+    route = respx.post(CHAT_URL).mock(
+        side_effect=[upstream_error(429, "rate limited"), reply('{"score": 1}')])
+    assert make_client().ask("prompt") == {"score": 1}
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_non_retryable_error_inside_a_200_body_fails_fast():
+    route = respx.post(CHAT_URL).mock(return_value=upstream_error(400, "bad request"))
+    with pytest.raises(JudgeError, match="400"):
+        make_client().ask("prompt")
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_error_body_without_a_code_fails_fast():
+    # No code means nothing says it is transient. Burning five attempts on a
+    # permanent error just delays the real message.
+    route = respx.post(CHAT_URL).mock(return_value=upstream_error(None, "mystery"))
+    with pytest.raises(JudgeError, match="mystery"):
+        make_client().ask("prompt")
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_string_error_code_is_still_understood():
+    route = respx.post(CHAT_URL).mock(
+        side_effect=[upstream_error("502"), reply('{"score": 3}')])
+    assert make_client().ask("prompt") == {"score": 3}
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_non_json_body_on_200_is_retried():
+    route = respx.post(CHAT_URL).mock(
+        side_effect=[httpx.Response(200, text="<html>gateway timeout</html>"),
+                     reply('{"score": 4}')])
+    assert make_client().ask("prompt") == {"score": 4}
+    assert route.call_count == 2
+
+
 @respx.mock
 def test_cache_hit_skips_the_network():
     cache = MemoryCache()
