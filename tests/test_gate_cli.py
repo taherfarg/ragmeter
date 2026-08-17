@@ -1,0 +1,102 @@
+from pathlib import Path
+
+import httpx
+import pytest
+import respx
+from typer.testing import CliRunner
+
+from ragmeter.cli import app
+from ragmeter.metrics.cost import MODELS_URL
+
+FIXTURES = Path(__file__).parent / "fixtures"
+CATALOG = {"data": [{"id": "openai/gpt-4o-mini",
+                     "pricing": {"prompt": "0.00000015", "completion": "0.0000006"}}]}
+
+runner = CliRunner()
+
+
+@pytest.fixture()
+def evaluated(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGMETER_DB_URL", f"sqlite:///{tmp_path / 'gate.db'}")
+    runner.invoke(app, ["dataset", "load", str(FIXTURES / "golden.yaml"),
+                        "--name", "docs", "--version", "v1"])
+    for name, path in (("baseline", "traces.jsonl"), ("candidate", "traces_v2.jsonl")):
+        runner.invoke(app, ["ingest", str(FIXTURES / path), "--run", name])
+        with respx.mock:
+            respx.get(MODELS_URL).mock(return_value=httpx.Response(200, json=CATALOG))
+            runner.invoke(app, ["eval", "--run", name, "--dataset", "docs",
+                                "--version", "v1", "--k", "3"])
+    return tmp_path
+
+
+def gate_file(tmp_path, text):
+    path = tmp_path / "g.yaml"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_gate_fails_on_the_known_regression(evaluated):
+    config = gate_file(evaluated, "min_samples: 3\nmetrics:\n  recall@3:\n    max_drop: 0.02\n")
+    result = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    # Exit 1 means "worse", distinct from exit 2 which means "broken".
+    assert result.exit_code == 1, result.output
+    assert "FAIL" in result.output
+    assert "recall@3" in result.output
+
+
+def test_gate_passes_with_a_loose_threshold(evaluated):
+    config = gate_file(evaluated, "min_samples: 3\nmetrics:\n  recall@3:\n    max_drop: 0.5\n")
+    result = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    assert result.exit_code == 0, result.output
+    assert "PASS" in result.output
+
+
+def test_gate_fails_on_doubled_cost(evaluated):
+    # traces_v2 uses exactly double the tokens, so the mean cost rises 100%.
+    config = gate_file(evaluated,
+                       "metrics:\n  cost_usd:\n    stat: mean\n    max_increase_pct: 20\n")
+    result = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    assert result.exit_code == 1, result.output
+    assert "100" in result.output
+
+
+def test_gate_reports_min_samples_shortfall(evaluated):
+    config = gate_file(evaluated, "min_samples: 99\nmetrics:\n  recall@3:\n    max_drop: 0.9\n")
+    result = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    assert result.exit_code == 1, result.output
+    assert "min_samples" in result.output
+
+
+def test_bad_config_exits_two_not_one(evaluated):
+    config = gate_file(evaluated, "metrics: {}\n")
+    result = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    # A broken config is not a regression. CI must be able to tell them apart.
+    assert result.exit_code == 2, result.output
+
+
+def test_unknown_run_exits_two(evaluated):
+    config = gate_file(evaluated, "metrics:\n  recall@3:\n    max_drop: 0.5\n")
+    result = runner.invoke(app, ["gate", "--run", "nope", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    assert result.exit_code == 2, result.output
+    assert "no run named" in result.output
+
+
+def test_gate_against_itself_always_passes(evaluated):
+    config = gate_file(evaluated, "min_samples: 3\nmetrics:\n  recall@3:\n    max_drop: 0.0\n")
+    result = runner.invoke(app, ["gate", "--run", "baseline", "--baseline", "baseline",
+                                 "--config", config, "--k", "3"])
+    assert result.exit_code == 0, result.output
+
+
+def test_compare_shows_the_diff_without_failing(evaluated):
+    result = runner.invoke(app, ["compare", "--run", "candidate",
+                                 "--baseline", "baseline", "--k", "3"])
+    # compare reports; it never blocks. That is what gate is for.
+    assert result.exit_code == 0, result.output
+    assert "recall@3" in result.output

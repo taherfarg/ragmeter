@@ -52,6 +52,46 @@ cost_usd            9.90e-05    1.08e-04    1.44e-04         5/6
 latency_ms          441.6667    380.0000    900.0000         6/6
 ```
 
+## Regression gate
+
+```bash
+ragmeter gate --run candidate --baseline baseline --config gate.yaml --k 3
+```
+
+```
+gate: FAIL
+  run=candidate  baseline=baseline  k=3  paired questions=5
+
+metric                    baseline   candidate       delta     limit       +/-  verdict
+------------------------------------------------------------------------------------------
+recall@3                    0.6000      0.4000     -0.2000    0.0200     +1/-2  FAIL  (dropped 0.2000, limit is 0.0200)
+cost_usd (mean)           9.90e-05    1.98e-04    100.0000   20.0000            FAIL  (rose 100.00%, limit is 20.00%)
+```
+
+Exit codes: `0` pass, `1` regression, `2` config or data error. CI needs to
+tell "the model got worse" from "the tool broke".
+
+```yaml
+min_samples: 3
+fail_on_missing: true
+metrics:
+  recall@3:    {max_drop: 0.02}                     # higher is better, per question
+  cost_usd:    {stat: mean, max_increase_pct: 20}   # lower is better, aggregate
+  latency_ms:  {stat: p95, max_increase_pct: 25}
+```
+
+Quality metrics are compared **per question**, using only the questions present
+in both runs. The output shows `+improved/-regressed` counts next to the mean
+delta, because a mean near zero can hide half the questions collapsing while
+the other half improve — which is the change you most need to catch.
+
+The gate **fails closed**: a missing metric, an unmeasurable one, or a judge
+failure in either run blocks the deploy. Set `fail_on_missing: false` to
+override, understanding that you are asking it to pass on things it could not
+measure.
+
+`ragmeter compare` shows the same diff with no verdict and no non-zero exit.
+
 ## Trace format
 
 One JSON object per line:
@@ -116,5 +156,5 @@ SQLite for development, Postgres for running. Same code either way.
 
 ## Status
 
-Phase 2 of 5. Next: the regression gate, judge calibration, and the HTTP API.
+Phase 3 of 5. Next: judge calibration and the HTTP API.
 See `docs/superpowers/specs/2026-08-17-rag-evaluation-platform-design.md`.
