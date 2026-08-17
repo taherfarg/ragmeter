@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from ragmeter.db import init_db, make_engine, make_session
+from ragmeter.judge.client import DbJudgeCache, JudgeClient, JudgeError
 from ragmeter.loaders import get_or_create_run, load_golden, load_traces
 from ragmeter.metrics.cost import fetch_prices
 from ragmeter.report import render_summary, summarize_run
@@ -71,6 +72,9 @@ def evaluate(
     dataset: str = typer.Option(..., "--dataset"),
     version: str = typer.Option("v1", "--version"),
     k: int = typer.Option(5, "--k", min=1),
+    judge: bool = typer.Option(False, "--judge/--no-judge",
+                               help="Score faithfulness and answer relevance via OpenRouter."),
+    judge_model: str | None = typer.Option(None, "--judge-model"),
 ) -> None:
     """Compute retrieval, cost, and latency metrics for a run."""
     try:
@@ -81,8 +85,20 @@ def evaluate(
         prices = {}
 
     session = _session()
+    judge_client = None
+    if judge:
+        try:
+            judge_client = JudgeClient(model=judge_model, cache=DbJudgeCache(session))
+        except JudgeError as exc:
+            # Fail before evaluating rather than after, so the user is not left
+            # wondering why every judge column is blank.
+            session.close()
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(2)
+
     try:
-        result = evaluate_run(session, run, dataset, version, k=k, prices=prices)
+        result = evaluate_run(session, run, dataset, version, k=k, prices=prices,
+                              judge=judge_client)
         summary = summarize_run(session, run, k=k)
     except ValueError as exc:
         typer.echo(f"error: {exc}", err=True)
@@ -96,6 +112,12 @@ def evaluate(
         f"{result['n_traces']} traces, {result['n_matched']} matched to golden, "
         f"{result['n_unmatched']} unmatched"
     )
+    if result["n_judge_failures"]:
+        typer.echo(
+            f"WARNING: the judge failed on {result['n_judge_failures']} trace(s); "
+            f"those metrics are blank, not zero",
+            err=True,
+        )
 
 
 if __name__ == "__main__":
