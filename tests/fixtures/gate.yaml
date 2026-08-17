@@ -1,0 +1,11 @@
+min_samples: 3
+fail_on_missing: true
+metrics:
+  recall@3:
+    max_drop: 0.02
+  cost_usd:
+    stat: mean
+    max_increase_pct: 20
+  latency_ms:
+    stat: p95
+    max_increase_pct: 25
