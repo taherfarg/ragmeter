@@ -70,3 +70,16 @@ def test_eval_survives_price_fetch_failure(db_url):
     assert result.exit_code == 0, result.output
     assert "could not fetch model prices" in result.output
     assert "recall@3" in result.output
+
+
+def test_judge_without_api_key_fails_before_evaluating(db_url, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    runner.invoke(app, ["dataset", "load", str(FIXTURES / "golden.yaml"),
+                        "--name", "docs", "--version", "v1"])
+    runner.invoke(app, ["ingest", str(FIXTURES / "traces.jsonl"), "--run", "baseline"])
+    with respx.mock:
+        respx.get(MODELS_URL).mock(return_value=httpx.Response(200, json=CATALOG))
+        result = runner.invoke(app, ["eval", "--run", "baseline", "--dataset", "docs",
+                                     "--version", "v1", "--judge"])
+    assert result.exit_code == 2
+    assert "OPENROUTER_API_KEY" in result.output
