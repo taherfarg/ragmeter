@@ -1,7 +1,10 @@
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from ragmeter.db import Evaluation, GoldenItem, Run, Trace, init_db, make_engine, make_session
+from ragmeter.db import (
+    Evaluation, GoldenItem, JudgeCache, Run, Trace,
+    init_db, make_engine, make_session,
+)
 
 
 @pytest.fixture()
@@ -62,3 +65,9 @@ def test_evaluation_defaults_to_skipped_judge(session):
     session.commit()
     assert ev.judge_status == "skipped"
     assert ev.evaluation_id is not None
+
+
+def test_judge_cache_roundtrip(session):
+    session.add(JudgeCache(key="abc123", response_json={"score": 4}))
+    session.commit()
+    assert session.get(JudgeCache, "abc123").response_json == {"score": 4}

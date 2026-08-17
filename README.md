@@ -20,6 +20,25 @@ ragmeter ingest traces.jsonl --run semantic-v2
 ragmeter eval --run semantic-v2 --dataset docs --version v1 --k 5
 ```
 
+With the LLM judge:
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+ragmeter eval --run semantic-v2 --dataset docs --version v1 --k 5 --judge
+```
+
+`--judge` adds `faithfulness` (what fraction of the answer's claims the
+retrieved chunks actually support) and `answer_relevance` (whether the answer
+addresses the question at all). Responses are cached by prompt hash, so
+re-running an evaluation costs nothing.
+
+When a trace has no golden match, the judge also grades each retrieved chunk,
+which yields `precision@k` without labels. It never yields recall — nothing can
+measure a relevant chunk that was never retrieved.
+
+If the judge fails, its metrics stay blank and the run reports the failure
+count. They are never filled in with zero.
+
 ```
 run: semantic-v2   k=3
 
@@ -84,6 +103,8 @@ bites first.
 | variable | default |
 |---|---|
 | `RAGMETER_DB_URL` | `sqlite:///ragmeter.db` |
+| `OPENROUTER_API_KEY` | — (required for `--judge`) |
+| `RAGMETER_JUDGE_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b:free` |
 
 SQLite for development, Postgres for running. Same code either way.
 
@@ -95,6 +116,5 @@ SQLite for development, Postgres for running. Same code either way.
 
 ## Status
 
-Phase 1 of 5. Next: LLM judge (faithfulness, answer relevance), then the
-regression gate, judge calibration, and the HTTP API. See
-`docs/superpowers/specs/2026-08-17-rag-evaluation-platform-design.md`.
+Phase 2 of 5. Next: the regression gate, judge calibration, and the HTTP API.
+See `docs/superpowers/specs/2026-08-17-rag-evaluation-platform-design.md`.

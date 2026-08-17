@@ -12,7 +12,7 @@ from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 __all__ = [
-    "Base", "Run", "Trace", "GoldenItem", "Evaluation", "ModelPrice",
+    "Base", "Run", "Trace", "GoldenItem", "Evaluation", "ModelPrice", "JudgeCache",
     "make_engine", "init_db", "make_session",
 ]
 
@@ -93,6 +93,21 @@ class ModelPrice(Base):
     prompt_price: Mapped[float] = mapped_column(Float)
     completion_price: Mapped[float] = mapped_column(Float)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class JudgeCache(Base):
+    """Judge responses keyed by sha256(model | prompt_version | prompt).
+
+    The judge model runs at temperature 0, so an identical prompt has an
+    identical answer. Caching keeps a re-run of a 200-question eval free rather
+    than burning a free-tier daily quota to recompute what did not change.
+    """
+
+    __tablename__ = "judge_cache"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    response_json: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 DEFAULT_DB_URL = "sqlite:///ragmeter.db"
