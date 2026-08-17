@@ -1,0 +1,15 @@
+- question_id: q1
+  question: What is the return policy?
+  relevant_chunk_ids: [c1, c2]
+- question_id: q2
+  question: How long does shipping take?
+  relevant_chunk_ids: [c5]
+- question_id: q3
+  question: Do you ship to the UAE?
+  relevant_chunk_ids: [c7, c8]
+- question_id: q4
+  question: What payment methods are accepted?
+  relevant_chunk_ids: [c10]
+- question_id: q5
+  question: Can I cancel an order?
+  relevant_chunk_ids: [c12, c13, c14]
