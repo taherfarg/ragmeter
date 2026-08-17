@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from ragmeter.db import (
-    Evaluation, GoldenItem, JudgeCache, Run, Trace,
+    Evaluation, GoldenItem, HumanLabel, JudgeCache, Run, Trace,
     init_db, make_engine, make_session,
 )
 
@@ -71,3 +71,34 @@ def test_judge_cache_roundtrip(session):
     session.add(JudgeCache(key="abc123", response_json={"score": 4}))
     session.commit()
     assert session.get(JudgeCache, "abc123").response_json == {"score": 4}
+
+
+def test_human_label_roundtrip(session):
+    run = Run(name="r")
+    session.add(run)
+    session.flush()
+    session.add(Trace(trace_id="t1", run_id=run.run_id, question="why?"))
+    session.flush()
+    session.add(HumanLabel(trace_id="t1", metric="faithfulness",
+                           value=1.0, labeler="taher"))
+    session.commit()
+
+    loaded = session.query(HumanLabel).filter_by(trace_id="t1").one()
+    assert loaded.value == 1.0
+    assert loaded.metric == "faithfulness"
+    assert loaded.label_id is not None
+
+
+def test_one_label_per_trace_metric_labeler(session):
+    run = Run(name="r")
+    session.add(run)
+    session.flush()
+    session.add(Trace(trace_id="t1", run_id=run.run_id, question="why?"))
+    session.flush()
+    session.add(HumanLabel(trace_id="t1", metric="faithfulness", value=1.0, labeler="a"))
+    session.commit()
+    # Relabelling must replace, not accumulate: two contradictory labels from
+    # the same person would silently double-count in the kappa.
+    session.add(HumanLabel(trace_id="t1", metric="faithfulness", value=0.0, labeler="a"))
+    with pytest.raises(IntegrityError):
+        session.commit()
