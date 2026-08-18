@@ -137,3 +137,10 @@ def test_judge_errors_propagate():
     judge = FakeJudge(JudgeError("rate limited"))
     with pytest.raises(JudgeError, match="rate limited"):
         score_faithfulness(judge, "q", CHUNKS, "answer")
+
+
+def test_refusal_yielding_no_claims_is_unmeasurable():
+    judge = FakeJudge({"claims": []})
+    out = score_faithfulness(judge, "q", CHUNKS, "I don't know.")
+    assert out["score"] is None
+    assert "no factual claims" in out["reason"]
