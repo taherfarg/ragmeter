@@ -169,6 +169,41 @@ docker compose up -d
 export RAGMETER_DB_URL="postgresql+psycopg://ragmeter:ragmeter@localhost:5433/ragmeter"
 ```
 
+## Running the gate in CI
+
+```bash
+ragmeter export --run known-good --k 5 --metrics "recall@5,ndcg@5,mrr@5"   --out baselines/paragraph.json                                    # once
+ragmeter gate --run candidate --baseline-file baselines/paragraph.json   --config scripts/gate.yaml --k 5                                  # every build
+```
+
+The baseline is a **committed JSON snapshot** of per-question metrics, not a
+database. CI keeps no state between runs, and the gate compares per question,
+so an aggregate summary would not be enough to pair against.
+
+`--metrics` restricts what is stored. Leave timing metrics out: BM25 latency
+rounds to 0 or 1 ms, so including it made the baseline differ on every single
+run, and a baseline that always diffs is one nobody reviews. With it excluded,
+two independent runs produce byte-identical files.
+
+Exit codes matter here:
+
+| exit | meaning |
+|---|---|
+| 0 | nothing got worse |
+| 1 | a real regression |
+| 2 | could not measure — bad config, missing run, or no baseline |
+
+A missing baseline is **2**, not 1, and the error names the `ragmeter export`
+command that creates one. A first run with no baseline must not look like the
+model got worse.
+
+**Metric names embed k.** A config written for `recall@3` measures nothing at
+k=5, and the gate correctly refuses to pass rather than silently checking an
+empty set. That is why `scripts/gate.yaml` is separate from the root
+`gate.yaml`.
+
+See `.github/workflows/ci.yml` and `scripts/gate.sh`.
+
 ## Trace format
 
 One JSON object per line:
