@@ -4,7 +4,7 @@ PROMPT_VERSION is part of every cache key. Bump it by hand whenever a template
 below changes, or the cache will keep serving scores produced by the old wording.
 """
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
 __all__ = [
     "PROMPT_VERSION",
@@ -36,6 +36,11 @@ Break the ANSWER into atomic factual claims. For each claim, decide whether the
 SOURCES support it. A claim is supported only if a source states it or directly
 implies it. Correct-sounding general knowledge that does not appear in the
 SOURCES is NOT supported. Cite the chunk ids in square brackets above.
+
+If the ANSWER asserts nothing about the world -- a refusal, "I don't know", an
+apology, or a request for clarification -- return an empty claims list. Do NOT
+turn the refusal itself into a claim about the speaker. An answer that declines
+to answer is not unfaithful; it simply cannot be scored for faithfulness.
 
 Return only a JSON object of this shape and nothing else:
 {{"claims": [{{"claim": "...", "supported": true, "chunk_ids": ["c1"], "reason": "..."}}]}}

@@ -27,7 +27,10 @@ def score_faithfulness(judge, question: str, chunks: list[dict], answer: str) ->
     if not isinstance(claims, list):
         raise JudgeError(f"judge response missing a 'claims' list: {data}")
     if not claims:
-        return {"score": None, "claims": [], "reason": "judge extracted no claims"}
+        # A refusal or non-answer. Not a zero: it asserted nothing to check, and
+        # zero is the score a confident fabrication gets.
+        return {"score": None, "claims": [],
+                "reason": "answer makes no factual claims (refusal or non-answer)"}
 
     # Only a literal True counts as support. Anything else is the model
     # departing from the schema, and reading it as support inflates the score.

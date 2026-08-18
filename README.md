@@ -39,6 +39,11 @@ measure a relevant chunk that was never retrieved.
 If the judge fails, its metrics stay blank and the run reports the failure
 count. They are never filled in with zero.
 
+An answer that declines to answer ("I don't know") scores `faithfulness` as
+blank, not zero. It asserts nothing, so there is nothing to check — and scoring
+it zero would give an honest refusal the same mark as a confident fabrication,
+teaching the gate to prefer the fabrication.
+
 ```
 run: semantic-v2   k=3
 
@@ -133,6 +138,37 @@ when reviewing after the fact.
 Labelling is resumable: each run offers traces you have not judged yet, and
 labels are per-labeler, so two people can rate the same traces.
 
+## HTTP API
+
+```bash
+pip install -e ".[api]"
+ragmeter serve --port 8000
+```
+
+| method | path | |
+|---|---|---|
+| POST | `/v1/runs` | create or fetch a run by name |
+| POST | `/v1/datasets` | upload a golden dataset |
+| POST | `/v1/runs/{id}/traces` | batch ingest, idempotent on `trace_id` |
+| POST | `/v1/runs/{id}/evaluate` | 202; runs in the background |
+| GET | `/v1/runs/{id}/metrics` | aggregates with unmeasured counts |
+| GET | `/v1/compare` | the paired diff, no verdict |
+| GET | `/healthz` | |
+
+A malformed trace in a batch does not reject the rest: valid records ingest and
+the response carries an `errors` array naming the offending indexes. Only a
+batch where nothing was usable returns 422.
+
+The API stores and serves; it computes nothing. Every calculation lives in the
+library, which is why `ragmeter gate` runs in CI with no server at all.
+
+### Postgres
+
+```bash
+docker compose up -d
+export RAGMETER_DB_URL="postgresql+psycopg://ragmeter:ragmeter@localhost:5433/ragmeter"
+```
+
 ## Trace format
 
 One JSON object per line:
@@ -197,5 +233,8 @@ SQLite for development, Postgres for running. Same code either way.
 
 ## Status
 
-Phase 4 of 5. Next: the HTTP API.
+All five phases complete: retrieval metrics, LLM judge, regression gate, judge
+calibration, HTTP API. Deferred by choice: the Next.js dashboard and
+OpenTelemetry ingestion.
+
 See `docs/superpowers/specs/2026-08-17-rag-evaluation-platform-design.md`.
