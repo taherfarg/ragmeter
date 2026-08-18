@@ -104,11 +104,16 @@ def _lexical_cohesion(doc_id: str, text: str, threshold: float = 0.15) -> list[C
 
 
 STRATEGIES = {
+    # The very small sizes exist to show where retrieval collapses: at 25
+    # characters a chunk cannot hold an answer and its context at once.
+    "fixed-25": lambda d, t: _fixed(d, t, 25),
+    "fixed-50": lambda d, t: _fixed(d, t, 50),
     "fixed-100": lambda d, t: _fixed(d, t, 100),
     "fixed-100-overlap-50": lambda d, t: _fixed(d, t, 100, 50),
     "fixed-400": lambda d, t: _fixed(d, t, 400),
     "fixed-400-overlap-100": lambda d, t: _fixed(d, t, 400, 100),
     "paragraph": _paragraphs,
+    "sentence-1": lambda d, t: _sentences(d, t, 1),
     "sentence-2": lambda d, t: _sentences(d, t, 2),
     "sentence-4": lambda d, t: _sentences(d, t, 4),
     "lexical-cohesion": _lexical_cohesion,
