@@ -1,0 +1,20 @@
+# Gate config for the example RAG in CI. Kept separate from the root gate.yaml
+# because metric names embed k -- a config written for k=3 measures nothing at
+# k=5, and the gate correctly refuses to pass on metrics it cannot find.
+min_samples: 100
+fail_on_missing: true
+
+metrics:
+  recall@5:
+    max_drop: 0.02
+  ndcg@5:
+    max_drop: 0.03
+  mrr@5:
+    max_drop: 0.03
+
+# No cost_usd rule: BM25 retrieval carries no token counts, so cost is
+# permanently unmeasurable here and a rule on it could only ever fail.
+#
+# No latency rule either: BM25 answers in well under a millisecond, and
+# latency_ms is a whole-number column, so every value rounds to 0 or 1. A
+# percentage threshold on that measures rounding, not performance.
