@@ -15,7 +15,11 @@ dependencies = [
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 postgres = ["psycopg[binary]>=3.2"]
 dev = ["pytest>=8", "respx>=0.21"]
-ragas = ["ragas>=0.2"]
+# Reference implementation for cross-checking our metrics, never a runtime
+# dependency. Pinned because ragas 0.2 and 0.4 both import
+# langchain_community.chat_models.vertexai, which modern langchain-community
+# no longer ships; rapidfuzz backs its non-LLM string matching.
+ragas = ["ragas>=0.2,<0.3", "langchain-community<0.4", "rapidfuzz"]
 
 [project.scripts]
 ragmeter = "ragmeter.cli:app"

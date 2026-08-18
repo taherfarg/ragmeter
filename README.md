@@ -225,6 +225,34 @@ bites first.
 
 SQLite for development, Postgres for running. Same code either way.
 
+## Checked against RAGAS
+
+RAGAS is used as a **reference implementation**, never as a dependency —
+installing it pulls 60+ packages including numpy, scipy, pandas and the whole
+langchain tree. It lives in an optional extra and its parity test skips unless
+present.
+
+```bash
+python -m venv .venv-ragas
+.venv-ragas/Scripts/python -m pip install -e ".[ragas]" pytest
+.venv-ragas/Scripts/python -m pytest tests/test_ragas_parity.py
+```
+
+A separate venv keeps the main one provably free of numpy and scipy.
+
+Only RAGAS's *deterministic* metrics are compared. Its LLM-backed metrics would
+make the reference depend on a model's mood, and a flaky reference is not a
+reference.
+
+**`recall@k` matches RAGAS exactly** across found/half-found/missed/noisy and
+duplicate-retrieval cases.
+
+**`precision@k` deliberately differs.** RAGAS computes average precision, which
+rewards putting the relevant chunk first; ours answers a different question —
+what fraction of what you retrieved was useful — and is order-independent. Rank
+is accounted for by `mrr@k` and `ndcg@k` instead. The parity test pins this
+divergence so nobody "fixes" it without deciding to.
+
 ## Development
 
 ```bash
