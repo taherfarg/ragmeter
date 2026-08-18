@@ -3,7 +3,10 @@ from pathlib import Path
 import pytest
 
 from ragmeter.db import GoldenItem, Run, Trace, init_db, make_engine, make_session
-from ragmeter.loaders import get_or_create_run, load_golden, load_traces
+from ragmeter.loaders import (
+    get_or_create_run, ingest_golden, ingest_traces, load_golden, load_traces,
+)
+from ragmeter.models import GoldenItemIn, TraceIn
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -72,3 +75,34 @@ def test_get_or_create_run_reuses_by_name(session):
     b = get_or_create_run(session, "same")
     assert a.run_id == b.run_id
     assert session.query(Run).count() == 1
+
+
+def test_ingest_traces_accepts_parsed_records(session):
+    run = get_or_create_run(session, "api")
+    result = ingest_traces(session, [TraceIn(trace_id="a1", question="why?")], run)
+    session.commit()
+    assert result == {"ingested": 1, "skipped": 0}
+    assert session.get(Trace, "a1").question == "why?"
+
+
+def test_ingest_traces_is_idempotent(session):
+    run = get_or_create_run(session, "api")
+    records = [TraceIn(trace_id="a1", question="why?")]
+    ingest_traces(session, records, run)
+    session.commit()
+    assert ingest_traces(session, records, run) == {"ingested": 0, "skipped": 1}
+
+
+def test_ingest_golden_accepts_parsed_records(session):
+    items = [GoldenItemIn(question_id="q9", question="why?", relevant_chunk_ids=["c1"])]
+    assert ingest_golden(session, items, dataset="d", version="v1") == 1
+    session.commit()
+    assert session.get(GoldenItem, ("d", "v1", "q9")).relevant_chunk_ids == ["c1"]
+
+
+def test_file_loaders_still_work_after_the_split(session):
+    # The CLI path must be unchanged: the file readers now delegate, and their
+    # fail-fast behaviour on a malformed line is deliberate.
+    run = get_or_create_run(session, "baseline")
+    assert load_traces(session, FIXTURES / "traces.jsonl", run)["ingested"] == 6
+    assert load_golden(session, FIXTURES / "golden.yaml", dataset="d", version="v1") == 5
