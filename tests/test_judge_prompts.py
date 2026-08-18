@@ -50,3 +50,20 @@ def test_prompt_version_is_a_nonempty_string():
     # The cache key includes this. Editing a prompt without bumping it serves
     # stale scores from before the edit.
     assert isinstance(PROMPT_VERSION, str) and PROMPT_VERSION
+
+
+def test_faithfulness_prompt_tells_the_judge_how_to_treat_a_refusal():
+    # "I don't know" asserts nothing about the world, so faithfulness is not
+    # defined over it. Without this instruction the judge invents a claim about
+    # the speaker and scores the refusal 0.0 -- the same score a confident
+    # fabrication gets.
+    p = faithfulness_prompt("q", [{"chunk_id": "c1", "text": "t"}], "I don't know.")
+    lowered = p.lower()
+    assert "refus" in lowered or "does not answer" in lowered
+    assert "empty" in lowered or "[]" in p
+
+
+def test_prompt_version_bumped_past_one():
+    # The cache key embeds this. Editing the wording without bumping it would
+    # keep serving verdicts produced by the previous prompt.
+    assert PROMPT_VERSION != "1"
