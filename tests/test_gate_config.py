@@ -92,3 +92,18 @@ def test_rejects_negative_min_samples(tmp_path):
 def test_missing_file_raises(tmp_path):
     with pytest.raises(GateConfigError, match="not found"):
         load_gate_config(tmp_path / "nope.yaml")
+
+
+def test_diff_config_never_fails_any_metric():
+    from ragmeter.gate.config import diff_config
+
+    cfg = diff_config(["recall@3", "cost_usd", "faithfulness"], k=3)
+    by_name = {r.name: r for r in cfg.metrics}
+    # Quality metrics compare per question; everything else on an aggregate.
+    assert by_name["recall@3"].is_paired is True
+    assert by_name["faithfulness"].is_paired is True
+    assert by_name["cost_usd"].is_paired is False
+    # Limits are infinite: a diff reports, it never blocks.
+    assert all(r.limit == float("inf") for r in cfg.metrics)
+    assert cfg.fail_on_missing is False
+    assert cfg.min_samples == 0
