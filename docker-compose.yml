@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ragmeter
+      POSTGRES_PASSWORD: ragmeter
+      POSTGRES_DB: ragmeter
+    # 5433 on the host so this never collides with a local Postgres on 5432.
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragmeter"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - ragmeter_pgdata:/var/lib/postgresql/data
+
+volumes:
+  ragmeter_pgdata:
