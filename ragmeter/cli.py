@@ -302,5 +302,21 @@ def calibration(
         )
 
 
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+    reload: bool = typer.Option(False, "--reload"),
+) -> None:
+    """Run the HTTP API."""
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo('error: the API extra is not installed; run: pip install -e ".[api]"',
+                   err=True)
+        raise typer.Exit(2)
+    uvicorn.run("ragmeter.api:app", host=host, port=port, reload=reload)
+
+
 if __name__ == "__main__":
     app()
