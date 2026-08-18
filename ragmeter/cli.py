@@ -14,6 +14,7 @@ from ragmeter.gate.collect import collect_run_metrics
 from ragmeter.gate.compare import compare
 from ragmeter.gate.config import GateConfigError, diff_config, load_gate_config
 from ragmeter.gate.render import render_gate
+from ragmeter.gate.snapshot import SnapshotError, dump_snapshot, load_snapshot
 from ragmeter.judge.client import DbJudgeCache, JudgeClient, JudgeError
 from ragmeter.loaders import get_or_create_run, load_golden, load_traces
 from ragmeter.metrics.cost import fetch_prices
@@ -136,14 +137,41 @@ def evaluate(
         )
 
 
+@app.command("export")
+def export(
+    run: str = typer.Option(..., "--run"),
+    k: int = typer.Option(5, "--k", min=1),
+    out: Path = typer.Option(..., "--out", help="Where to write the snapshot."),
+) -> None:
+    """Write a run's per-question metrics to a committable baseline file."""
+    session = _session()
+    try:
+        metrics = collect_run_metrics(session, run, k=k)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2)
+    finally:
+        session.close()
+
+    dump_snapshot(metrics, out, run=run, k=k)
+    typer.echo(f"wrote {out} ({len(metrics.by_question)} questions, k={k})")
+
+
 @app.command("gate")
 def gate(
     run: str = typer.Option(..., "--run", help="The candidate run."),
-    baseline: str = typer.Option(..., "--baseline", help="The run to compare against."),
     config: Path = typer.Option(..., "--config", exists=True, readable=True),
+    baseline: str | None = typer.Option(None, "--baseline",
+                                        help="A run in the database."),
+    baseline_file: Path | None = typer.Option(None, "--baseline-file",
+                                              help="A snapshot from `ragmeter export`."),
     k: int = typer.Option(5, "--k", min=1),
 ) -> None:
     """Fail when a run is worse than its baseline. Exit 1 = regression, 2 = error."""
+    if (baseline is None) == (baseline_file is None):
+        typer.echo("error: pass exactly one of --baseline or --baseline-file", err=True)
+        raise typer.Exit(2)
+
     try:
         gate_config = load_gate_config(config)
     except GateConfigError as exc:
@@ -152,18 +180,24 @@ def gate(
 
     session = _session()
     try:
-        base = collect_run_metrics(session, baseline, k=k)
+        if baseline_file is not None:
+            base = load_snapshot(baseline_file)
+            baseline_label = str(baseline_file)
+        else:
+            base = collect_run_metrics(session, baseline, k=k)
+            baseline_label = baseline
         cand = collect_run_metrics(session, run, k=k)
-    except ValueError as exc:
+    except (ValueError, SnapshotError) as exc:
+        # Exit 2, not 1. Missing or unreadable data is a tooling problem, and a
+        # first run with no baseline must not look like a regression.
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2)
     finally:
         session.close()
 
     result = compare(base, cand, gate_config)
-    typer.echo(render_gate(result, run, baseline, k))
-    # 1 is reserved for "the run got worse". A broken config or missing data
-    # exits 2 above, so CI can tell a regression from a tooling failure.
+    typer.echo(render_gate(result, run, baseline_label, k))
+    # 1 is reserved for "the run got worse".
     raise typer.Exit(0 if result.passed else 1)
 
 
