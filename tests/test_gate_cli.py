@@ -100,3 +100,60 @@ def test_compare_shows_the_diff_without_failing(evaluated):
     # compare reports; it never blocks. That is what gate is for.
     assert result.exit_code == 0, result.output
     assert "recall@3" in result.output
+
+
+def test_export_writes_a_snapshot(evaluated):
+    out = evaluated / "baseline.json"
+    result = runner.invoke(app, ["export", "--run", "baseline", "--k", "3",
+                                 "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.is_file()
+
+    from ragmeter.gate.snapshot import load_snapshot
+    snapshot = load_snapshot(out)
+    assert snapshot.by_question["q1"]["recall@3"] == 1.0
+
+
+def test_export_unknown_run_exits_two(evaluated):
+    result = runner.invoke(app, ["export", "--run", "nope", "--k", "3",
+                                 "--out", str(evaluated / "x.json")])
+    assert result.exit_code == 2
+
+
+def test_gate_against_a_snapshot_matches_the_database(evaluated):
+    out = evaluated / "baseline.json"
+    runner.invoke(app, ["export", "--run", "baseline", "--k", "3", "--out", str(out)])
+    config = gate_file(evaluated, "min_samples: 3\nmetrics:\n  recall@3:\n    max_drop: 0.02\n")
+
+    from_db = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                                  "--config", config, "--k", "3"])
+    from_file = runner.invoke(app, ["gate", "--run", "candidate",
+                                    "--baseline-file", str(out),
+                                    "--config", config, "--k", "3"])
+    # A snapshot must be indistinguishable from the live run it came from.
+    assert from_db.exit_code == from_file.exit_code == 1
+    assert "-0.2000" in from_file.output
+
+
+def test_gate_needs_exactly_one_baseline_source(evaluated):
+    config = gate_file(evaluated, "metrics:\n  recall@3:\n    max_drop: 0.5\n")
+    neither = runner.invoke(app, ["gate", "--run", "candidate",
+                                  "--config", config, "--k", "3"])
+    assert neither.exit_code == 2
+    assert "--baseline" in neither.output
+
+    both = runner.invoke(app, ["gate", "--run", "candidate", "--baseline", "baseline",
+                               "--baseline-file", str(evaluated / "b.json"),
+                               "--config", config, "--k", "3"])
+    assert both.exit_code == 2
+
+
+def test_missing_snapshot_exits_two_and_says_how_to_make_one(evaluated):
+    config = gate_file(evaluated, "metrics:\n  recall@3:\n    max_drop: 0.5\n")
+    result = runner.invoke(app, ["gate", "--run", "candidate",
+                                 "--baseline-file", str(evaluated / "absent.json"),
+                                 "--config", config, "--k", "3"])
+    # Exit 2, not 1: a missing baseline is a data problem, not a regression.
+    # The first CI run must not look like the model got worse.
+    assert result.exit_code == 2
+    assert "ragmeter export" in result.output

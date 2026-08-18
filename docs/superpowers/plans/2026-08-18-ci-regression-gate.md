@@ -434,14 +434,19 @@ BASELINE="baselines/${STRATEGY}.json"
 export RAGMETER_DB_URL="sqlite:///ci-gate.db"
 rm -f ci-gate.db
 
-python -m example_rag.cli --articles "$ARTICLES" --limit "$LIMIT" --k "$K" \
+# `python -m` rather than the console script, so this runs identically in CI
+# and from a shell where the venv is not on PATH.
+PY_BIN="${PY_BIN:-python}"
+RAGMETER="$PY_BIN -m ragmeter.cli"
+
+$PY_BIN -m example_rag.cli --articles "$ARTICLES" --limit "$LIMIT" --k "$K" \
     --strategies "$STRATEGY"
 
-ragmeter dataset load "data/runs/${STRATEGY}.golden.yaml" --name "$STRATEGY" --version v1
-ragmeter ingest "data/runs/${STRATEGY}.traces.jsonl" --run candidate
-ragmeter eval --run candidate --dataset "$STRATEGY" --version v1 --k "$K"
+$RAGMETER dataset load "data/runs/${STRATEGY}.golden.yaml" --name "$STRATEGY" --version v1
+$RAGMETER ingest "data/runs/${STRATEGY}.traces.jsonl" --run candidate
+$RAGMETER eval --run candidate --dataset "$STRATEGY" --version v1 --k "$K"
 
-ragmeter gate --run candidate --baseline-file "$BASELINE" --config gate.yaml --k "$K"
+$RAGMETER gate --run candidate --baseline-file "$BASELINE" --config gate.yaml --k "$K"
 ```
 
 - [ ] **Step 2: Create the workflow**
@@ -491,7 +496,7 @@ jobs:
 - [ ] **Step 3: Verify the script locally**
 
 ```bash
-bash scripts/gate.sh; echo "exit: $?"
+PY_BIN=.venv/Scripts/python.exe bash scripts/gate.sh; echo "exit: $?"
 ```
 
 Expected on a first run: exit 2, with the message naming `ragmeter export`.
@@ -503,7 +508,7 @@ reported as a regression.
 ```bash
 export RAGMETER_DB_URL="sqlite:///ci-gate.db"
 ragmeter export --run candidate --k 5 --out baselines/paragraph.json
-bash scripts/gate.sh; echo "exit: $?"
+PY_BIN=.venv/Scripts/python.exe bash scripts/gate.sh; echo "exit: $?"
 ```
 
 Expected: exit 0, `gate: PASS`, all deltas zero. Nothing changed, so nothing regressed.
@@ -514,7 +519,7 @@ Point the script at a strategy known to be worse and confirm it fails against
 the `paragraph` baseline:
 
 ```bash
-STRATEGY=fixed-100 bash scripts/gate.sh; echo "exit: $?"
+STRATEGY=fixed-100 PY_BIN=.venv/Scripts/python.exe bash scripts/gate.sh; echo "exit: $?"
 ```
 
 This will exit 2, because `baselines/fixed-100.json` does not exist. To test a
