@@ -3,8 +3,8 @@
 Measures any RAG system. Does not build one.
 
 Feed it traces (question, retrieved chunks, answer) and a labeled golden
-dataset; it reports retrieval quality, cost, and latency. Phase 1 makes no LLM
-calls at all.
+dataset; it reports retrieval quality, faithfulness, cost, and latency, then
+blocks a deploy that made any of them worse.
 
 ## Install
 
@@ -45,11 +45,13 @@ run: semantic-v2   k=3
 metric                  mean         p50         p95    measured
 ----------------------------------------------------------------
 recall@3              0.6000      1.0000      1.0000         5/6
-precision@3           0.5417      0.5000      1.0000         4/6
+precision@3           0.4333      0.5000      1.0000         5/6
 mrr@3                 0.5000      0.5000      1.0000         5/6
 ndcg@3                0.5262      0.6309      1.0000         5/6
 cost_usd            9.90e-05    1.08e-04    1.44e-04         5/6
 latency_ms          441.6667    380.0000    900.0000         6/6
+faithfulness          0.5333      0.6667      1.0000         5/6
+answer_relevance      0.5833      0.2500      1.0000         6/6
 ```
 
 ## Regression gate
@@ -91,6 +93,45 @@ override, understanding that you are asking it to pass on things it could not
 measure.
 
 `ragmeter compare` shows the same diff with no verdict and no non-zero exit.
+
+## Judge calibration
+
+An LLM judge is only worth what its agreement with a human is worth. Measure it:
+
+```bash
+ragmeter label --run baseline --metric faithfulness --k 3 --labeler you
+ragmeter calibration --run baseline --metric faithfulness --k 3
+```
+
+```
+calibration: faithfulness   run=baseline   k=3   threshold=0.5
+  pairs                 5
+  agreement rate        0.6000
+  Cohen's kappa         0.0000
+
+  both yes              3
+  judge yes / human no  0
+  judge no / human yes  2
+  both no               0
+
+NOTE: agreement 0.60 but kappa 0.00. Most of that agreement is chance,
+because the labels are lopsided. Quote the kappa.
+```
+
+**Agreement rate alone is a trap.** If 90% of your answers are genuinely
+faithful, a judge that blindly says "faithful" every time scores 90% agreement
+and is worthless. Cohen's kappa subtracts the agreement chance already explains
+and gives that judge the 0.0 it deserves. Kappa is the number to publish.
+
+Reading kappa: `< 0` worse than chance, `0.0-0.2` negligible, `0.2-0.4` fair,
+`0.4-0.6` moderate, `0.6-0.8` substantial, `> 0.8` near-perfect.
+
+`label` **hides the judge's score by default**. Seeing it first would anchor
+your answer and make the agreement number circular. Pass `--show-judge` only
+when reviewing after the fact.
+
+Labelling is resumable: each run offers traces you have not judged yet, and
+labels are per-labeler, so two people can rate the same traces.
 
 ## Trace format
 
@@ -156,5 +197,5 @@ SQLite for development, Postgres for running. Same code either way.
 
 ## Status
 
-Phase 3 of 5. Next: judge calibration and the HTTP API.
+Phase 4 of 5. Next: the HTTP API.
 See `docs/superpowers/specs/2026-08-17-rag-evaluation-platform-design.md`.
