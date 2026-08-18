@@ -1,6 +1,6 @@
 # Chunking Strategy Experiment
 
-Eight chunking strategies, 200 SQuAD questions each, measured with ragmeter.
+Eleven chunking strategies, 200 SQuAD questions each, measured with ragmeter.
 
 **Setup.** 5 SQuAD dev articles, BM25 retrieval, k=5, extractive answers. The
 retriever, the questions and k are identical across every run, so a difference
@@ -26,8 +26,30 @@ eight runs.**
 | `fixed-400` | 450 | 0.7150 | 0.1520 | 0.5503 | 0.5803 |
 | `fixed-400-overlap-100` | 597 | 0.7117 | **0.1960** | 0.5833 | 0.5883 |
 | `lexical-cohesion` | 1000 | 0.6725 | 0.1390 | 0.5396 | 0.5661 |
+| `sentence-1` | 1239 | 0.6475 | 0.1330 | 0.5108 | 0.5403 |
 | `fixed-100` | 1792 | 0.4492 | 0.1120 | 0.3713 | 0.3677 |
 | `fixed-100-overlap-50` | 3575 | 0.3573 | 0.1700 | 0.4181 | 0.3243 |
+| `fixed-50` | 3580 | 0.2917 | 0.0770 | 0.2285 | 0.2185 |
+| `fixed-25` | 7158 | 0.0550 | 0.0180 | 0.0535 | 0.0445 |
+
+## The size curve
+
+Holding the splitter type constant and only varying size, recall falls away
+sharply below roughly 100 characters:
+
+| fixed size | recall@5 |
+|---:|---:|
+| 400 chars | 0.7150 |
+| 100 chars | 0.4492 |
+| 50 chars | 0.2917 |
+| 25 chars | **0.0550** |
+
+At 25 characters a chunk cannot hold an answer and enough surrounding context
+for BM25 to match the question, so retrieval collapses almost completely — 7,158
+chunks and a recall of 5.5%. More chunks is not more coverage.
+
+Sentence-based splitting shows the same shape: 1 sentence 0.6475, 2 sentences
+0.7475, 4 sentences 0.8650.
 
 ## Headline
 
