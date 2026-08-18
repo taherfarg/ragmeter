@@ -82,3 +82,27 @@ def test_unparseable_json_raises(tmp_path):
     path.write_text("{oops", encoding="utf-8")
     with pytest.raises(SnapshotError, match="not valid JSON"):
         load_snapshot(path)
+
+
+def test_dump_can_restrict_which_metrics_it_stores(tmp_path):
+    # A baseline that includes a timing metric diffs on every run, because
+    # latency is noise. A noisy baseline is one nobody reviews.
+    path = tmp_path / "b.json"
+    dump_snapshot(METRICS, path, run="baseline", k=3, metrics_filter=["recall@3"])
+    loaded = load_snapshot(path)
+    assert loaded.by_question == {"q1": {"recall@3": 1.0}, "q2": {"recall@3": 0.5}}
+    assert loaded.all_values == {"recall@3": [1.0, 0.5]}
+
+
+def test_restricting_to_an_absent_metric_yields_empty_entries(tmp_path):
+    path = tmp_path / "b.json"
+    dump_snapshot(METRICS, path, run="baseline", k=3, metrics_filter=["nope"])
+    loaded = load_snapshot(path)
+    assert loaded.all_values == {}
+    assert all(v == {} for v in loaded.by_question.values())
+
+
+def test_no_restriction_stores_everything(tmp_path):
+    path = tmp_path / "b.json"
+    dump_snapshot(METRICS, path, run="baseline", k=3, metrics_filter=None)
+    assert load_snapshot(path).all_values == METRICS.all_values

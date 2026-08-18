@@ -19,13 +19,25 @@ class SnapshotError(ValueError):
     """The baseline snapshot is missing or unusable."""
 
 
-def dump_snapshot(metrics: RunMetrics, path: Path, run: str, k: int) -> None:
+def dump_snapshot(
+    metrics: RunMetrics, path: Path, run: str, k: int,
+    metrics_filter: list[str] | None = None,
+) -> None:
     """Write a baseline snapshot.
 
     Indented and key-sorted on purpose: a baseline nobody can read in a pull
     request is a baseline nobody will ever question, and stable ordering means
     a rerun with unchanged numbers produces no diff.
+
+    `metrics_filter` restricts which metrics are stored. Leaving a timing metric
+    in would make the file differ on every run -- latency is noise, and a
+    baseline that always diffs is one nobody reviews.
     """
+    keep = None if metrics_filter is None else set(metrics_filter)
+
+    def prune(values: dict) -> dict:
+        return values if keep is None else {n: v for n, v in values.items() if n in keep}
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -35,8 +47,8 @@ def dump_snapshot(metrics: RunMetrics, path: Path, run: str, k: int) -> None:
                 "k": k,
                 "n_traces": metrics.n_traces,
                 "judge_failures": metrics.judge_failures,
-                "by_question": metrics.by_question,
-                "all_values": metrics.all_values,
+                "by_question": {q: prune(v) for q, v in metrics.by_question.items()},
+                "all_values": prune(metrics.all_values),
             },
             indent=2,
             sort_keys=True,

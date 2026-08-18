@@ -142,19 +142,24 @@ def export(
     run: str = typer.Option(..., "--run"),
     k: int = typer.Option(5, "--k", min=1),
     out: Path = typer.Option(..., "--out", help="Where to write the snapshot."),
+    metrics: str | None = typer.Option(
+        None, "--metrics",
+        help="Comma-separated metrics to store. Omit a timing metric: latency "
+             "is noise and would make the baseline differ on every run."),
 ) -> None:
     """Write a run's per-question metrics to a committable baseline file."""
     session = _session()
     try:
-        metrics = collect_run_metrics(session, run, k=k)
+        collected = collect_run_metrics(session, run, k=k)
     except ValueError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2)
     finally:
         session.close()
 
-    dump_snapshot(metrics, out, run=run, k=k)
-    typer.echo(f"wrote {out} ({len(metrics.by_question)} questions, k={k})")
+    wanted = [m.strip() for m in metrics.split(",")] if metrics else None
+    dump_snapshot(collected, out, run=run, k=k, metrics_filter=wanted)
+    typer.echo(f"wrote {out} ({len(collected.by_question)} questions, k={k})")
 
 
 @app.command("gate")
