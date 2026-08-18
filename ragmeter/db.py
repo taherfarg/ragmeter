@@ -8,12 +8,15 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import (
+    JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint,
+    create_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 __all__ = [
     "Base", "Run", "Trace", "GoldenItem", "Evaluation", "ModelPrice", "JudgeCache",
-    "make_engine", "init_db", "make_session",
+    "HumanLabel", "make_engine", "init_db", "make_session",
 ]
 
 
@@ -107,6 +110,28 @@ class JudgeCache(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     response_json: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class HumanLabel(Base):
+    """A person's binary verdict on one trace, for calibrating the judge.
+
+    Binary only: the label CLI asks yes/no. Graded labels and rank correlation
+    are deferred until binary proves insufficient -- see the spec.
+    """
+
+    __tablename__ = "human_labels"
+    __table_args__ = (
+        # Relabelling replaces. Two contradictory labels from one person on one
+        # trace would silently double-count in the kappa.
+        UniqueConstraint("trace_id", "metric", "labeler", name="uq_label_once"),
+    )
+
+    label_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    trace_id: Mapped[str] = mapped_column(ForeignKey("traces.trace_id"), index=True)
+    metric: Mapped[str] = mapped_column(String(50), index=True)
+    value: Mapped[float] = mapped_column(Float)
+    labeler: Mapped[str] = mapped_column(String(100), default="human")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
