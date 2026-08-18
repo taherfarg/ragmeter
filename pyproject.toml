@@ -32,5 +32,5 @@ build-backend = "setuptools.build_meta"
 include = ["ragmeter*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "tests_rag"]
 markers = ["ragas: cross-check against RAGAS (requires the ragas extra)"]
