@@ -8,7 +8,8 @@ from pathlib import Path
 
 import typer
 
-from ragmeter.db import init_db, make_engine, make_session
+from ragmeter.calibration import calibrate, collect_labeled_pairs, unlabeled_traces
+from ragmeter.db import HumanLabel, init_db, make_engine, make_session
 from ragmeter.gate.collect import collect_run_metrics
 from ragmeter.gate.compare import compare
 from ragmeter.gate.config import GateConfig, GateConfigError, MetricRule, load_gate_config
@@ -23,6 +24,17 @@ from ragmeter.runner import evaluate_run
 app = typer.Typer(no_args_is_help=True, help="Measure any RAG system.")
 dataset_app = typer.Typer(no_args_is_help=True, help="Manage golden datasets.")
 app.add_typer(dataset_app, name="dataset")
+
+# What to actually ask a person, per metric. Phrasing matters: the question must
+# be answerable from the screen alone, without the judge's opinion.
+LABEL_QUESTIONS = {
+    "faithfulness": "Is every claim in the answer supported by the sources above?",
+    "answer_relevance": "Does the answer address the question?",
+}
+
+YES = {"y", "yes"}
+NO = {"n", "no"}
+QUIT = {"q", "quit"}
 
 
 def _session():
@@ -185,6 +197,117 @@ def compare_runs(
     result = compare(base, cand, GateConfig(metrics=rules, min_samples=0,
                                             fail_on_missing=False))
     typer.echo(render_gate(result, run, baseline, k))
+
+
+@app.command("label")
+def label(
+    run: str = typer.Option(..., "--run"),
+    metric: str = typer.Option("faithfulness", "--metric"),
+    k: int = typer.Option(5, "--k", min=1),
+    limit: int = typer.Option(20, "--limit", min=1),
+    labeler: str = typer.Option("human", "--labeler"),
+    show_judge: bool = typer.Option(
+        False, "--show-judge/--hide-judge",
+        help="Reveal the judge's score. Off by default: seeing it first anchors "
+             "your answer and makes the agreement number circular."),
+) -> None:
+    """Collect human yes/no judgements to calibrate the LLM judge against."""
+    question = LABEL_QUESTIONS.get(metric, f"Is {metric} satisfactory?")
+
+    session = _session()
+    try:
+        pending = unlabeled_traces(session, run, metric, k=k, labeler=labeler, limit=limit)
+    except ValueError as exc:
+        session.close()
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2)
+
+    if not pending:
+        session.close()
+        typer.echo(f"nothing to label for {metric!r} in run {run!r} as {labeler!r}")
+        return
+
+    stored = 0
+    skipped = 0
+    try:
+        for index, (trace, evaluation) in enumerate(pending, start=1):
+            typer.echo("=" * 72)
+            typer.echo(f"[{index}/{len(pending)}]  trace {trace.trace_id}")
+            typer.echo(f"\nQUESTION: {trace.question}")
+            typer.echo("\nSOURCES:")
+            for chunk in trace.retrieved or []:
+                text = chunk.get("text") or "(no text captured)"
+                typer.echo(f"  [{chunk['chunk_id']}] {text}")
+            typer.echo(f"\nANSWER: {trace.answer}")
+            if show_judge:
+                typer.echo(f"\njudge {metric}: {evaluation.metrics.get(metric)}")
+            typer.echo("")
+
+            answer = typer.prompt(f"{question} [y/n/s=skip/q=quit]").strip().lower()
+            if answer in QUIT:
+                break
+            if answer not in YES and answer not in NO:
+                # Anything unrecognised is a skip rather than a re-prompt. The
+                # trace stays pending, so the next run offers it again.
+                typer.echo("  not recognised, skipping")
+                skipped += 1
+                continue
+
+            session.add(HumanLabel(trace_id=trace.trace_id, metric=metric,
+                                   value=1.0 if answer in YES else 0.0,
+                                   labeler=labeler))
+            session.commit()
+            stored += 1
+    finally:
+        session.close()
+
+    typer.echo("")
+    typer.echo(f"labelled {stored}, skipped {skipped} as {labeler!r}")
+
+
+@app.command("calibration")
+def calibration(
+    run: str = typer.Option(..., "--run"),
+    metric: str = typer.Option("faithfulness", "--metric"),
+    k: int = typer.Option(5, "--k", min=1),
+    threshold: float = typer.Option(0.5, "--threshold", min=0.0, max=1.0),
+) -> None:
+    """Measure how well the judge agrees with human labels."""
+    session = _session()
+    try:
+        pairs = collect_labeled_pairs(session, run, metric, k=k)
+    except ValueError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2)
+    finally:
+        session.close()
+
+    result = calibrate(pairs, threshold=threshold)
+    if result.n == 0:
+        typer.echo(f"error: no labelled pairs for {metric!r} in run {run!r}; "
+                   f"run `ragmeter label` first", err=True)
+        raise typer.Exit(2)
+
+    typer.echo(f"calibration: {metric}   run={run}   k={k}   threshold={threshold}")
+    typer.echo(f"  pairs                 {result.n}")
+    typer.echo(f"  agreement rate        {result.agreement:.4f}")
+    if result.kappa is None:
+        typer.echo(f"  Cohen's kappa         -  ({result.kappa_note})")
+    else:
+        typer.echo(f"  Cohen's kappa         {result.kappa:.4f}")
+    typer.echo("")
+    typer.echo(f"  both yes              {result.confusion['both_yes']}")
+    typer.echo(f"  judge yes / human no  {result.confusion['judge_yes_human_no']}")
+    typer.echo(f"  judge no / human yes  {result.confusion['judge_no_human_yes']}")
+    typer.echo(f"  both no               {result.confusion['both_no']}")
+
+    if result.kappa is not None and result.agreement - result.kappa > 0.2:
+        typer.echo("")
+        typer.echo(
+            f"NOTE: agreement {result.agreement:.2f} but kappa {result.kappa:.2f}. "
+            f"Most of that agreement is chance, because the labels are lopsided. "
+            f"Quote the kappa."
+        )
 
 
 if __name__ == "__main__":
