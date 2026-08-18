@@ -1,5 +1,7 @@
 # ragmeter
 
+![ragmeter — measure RAG systems, don't guess, don't ship blindly](assets/overview.png)
+
 Measures any RAG system. Does not build one.
 
 Feed it traces (question, retrieved chunks, answer) and a labeled golden
@@ -172,8 +174,11 @@ export RAGMETER_DB_URL="postgresql+psycopg://ragmeter:ragmeter@localhost:5433/ra
 ## Running the gate in CI
 
 ```bash
-ragmeter export --run known-good --k 5 --metrics "recall@5,ndcg@5,mrr@5"   --out baselines/paragraph.json                                    # once
-ragmeter gate --run candidate --baseline-file baselines/paragraph.json   --config scripts/gate.yaml --k 5                                  # every build
+# once, from a known-good run
+ragmeter export --run known-good --k 5 --metrics "recall@5,ndcg@5,mrr@5" --out baselines/paragraph.json
+
+# every build
+ragmeter gate --run candidate --baseline-file baselines/paragraph.json --config scripts/gate.yaml --k 5
 ```
 
 The baseline is a **committed JSON snapshot** of per-question metrics, not a
