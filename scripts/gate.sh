@@ -4,11 +4,11 @@
 # run at all.
 set -euo pipefail
 
-STRATEGY="${STRATEGY:-paragraph}"
+STRATEGY="${STRATEGY:-fixed-100}"
 K="${K:-5}"
 ARTICLES="${ARTICLES:-5}"
 LIMIT="${LIMIT:-200}"
-BASELINE="baselines/${STRATEGY}.json"
+BASELINE="baselines/paragraph.json"
 # Must match scripts/gate.yaml. Timing metrics are excluded on purpose:
 # BM25 latency rounds to 0 or 1 ms, so it is noise, not signal.
 GATED_METRICS="${GATED_METRICS:-recall@5,ndcg@5,mrr@5}"
