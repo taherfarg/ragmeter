@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from ragmeter.db import GoldenItem, Run, Trace
 from ragmeter.models import GoldenItemIn, TraceIn
 
-__all__ = ["get_or_create_run", "load_golden", "load_traces"]
+__all__ = ["get_or_create_run", "ingest_golden", "ingest_traces",
+           "load_golden", "load_traces"]
 
 
 def get_or_create_run(
@@ -33,12 +34,38 @@ def load_golden(session: Session, path: Path, dataset: str, version: str) -> int
     if not isinstance(raw, list):
         raise ValueError(f"{path}: expected a list of golden items, got {type(raw).__name__}")
 
-    count = 0
+    items = []
     for index, entry in enumerate(raw, start=1):
         try:
-            item = GoldenItemIn.model_validate(entry)
+            items.append(GoldenItemIn.model_validate(entry))
         except Exception as exc:
             raise ValueError(f"{path}: item {index}: {exc}") from exc
+    return ingest_golden(session, items, dataset, version)
+
+
+def load_traces(session: Session, path: Path, run: Run) -> dict[str, int]:
+    """Load a JSONL trace file. Idempotent on trace_id: duplicates are skipped."""
+    records = []
+    with Path(path).open(encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(TraceIn.model_validate(json.loads(line)))
+            except Exception as exc:
+                # Fail fast on a malformed file: a corrupt input is a problem you
+                # want to hear about before half of it lands in the database. The
+                # HTTP batch path deliberately behaves differently.
+                raise ValueError(f"{path}: line {line_no}: {exc}") from exc
+    return ingest_traces(session, records, run)
+
+
+def ingest_golden(
+    session: Session, items: list[GoldenItemIn], dataset: str, version: str
+) -> int:
+    """Upsert already-validated golden items. Re-loading overwrites in place."""
+    for item in items:
         session.merge(GoldenItem(
             dataset=dataset,
             version=version,
@@ -47,42 +74,31 @@ def load_golden(session: Session, path: Path, dataset: str, version: str) -> int
             relevant_chunk_ids=item.relevant_chunk_ids,
             reference_answer=item.reference_answer,
         ))
-        count += 1
-    return count
+    return len(items)
 
 
-def load_traces(session: Session, path: Path, run: Run) -> dict[str, int]:
-    """Load a JSONL trace file. Idempotent on trace_id: duplicates are skipped."""
+def ingest_traces(session: Session, records: list[TraceIn], run: Run) -> dict[str, int]:
+    """Insert already-validated traces. Idempotent on trace_id."""
     ingested = 0
     skipped = 0
-    with Path(path).open(encoding="utf-8") as handle:
-        for line_no, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                trace_in = TraceIn.model_validate(json.loads(line))
-            except Exception as exc:
-                raise ValueError(f"{path}: line {line_no}: {exc}") from exc
-
-            if session.get(Trace, trace_in.trace_id) is not None:
-                skipped += 1
-                continue
-
-            session.add(Trace(
-                trace_id=trace_in.trace_id,
-                run_id=run.run_id,
-                question_id=trace_in.question_id,
-                question=trace_in.question,
-                retrieved=[c.model_dump() for c in trace_in.retrieved],
-                answer=trace_in.answer,
-                model=trace_in.model,
-                prompt_tokens=trace_in.prompt_tokens,
-                completion_tokens=trace_in.completion_tokens,
-                cost_usd=trace_in.cost_usd,
-                latency_ms=trace_in.latency_ms,
-                meta=trace_in.metadata,
-            ))
-            session.flush()
-            ingested += 1
+    for trace_in in records:
+        if session.get(Trace, trace_in.trace_id) is not None:
+            skipped += 1
+            continue
+        session.add(Trace(
+            trace_id=trace_in.trace_id,
+            run_id=run.run_id,
+            question_id=trace_in.question_id,
+            question=trace_in.question,
+            retrieved=[c.model_dump() for c in trace_in.retrieved],
+            answer=trace_in.answer,
+            model=trace_in.model,
+            prompt_tokens=trace_in.prompt_tokens,
+            completion_tokens=trace_in.completion_tokens,
+            cost_usd=trace_in.cost_usd,
+            latency_ms=trace_in.latency_ms,
+            meta=trace_in.metadata,
+        ))
+        session.flush()
+        ingested += 1
     return {"ingested": ingested, "skipped": skipped}

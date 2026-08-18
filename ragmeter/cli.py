@@ -12,12 +12,11 @@ from ragmeter.calibration import calibrate, collect_labeled_pairs, unlabeled_tra
 from ragmeter.db import HumanLabel, init_db, make_engine, make_session
 from ragmeter.gate.collect import collect_run_metrics
 from ragmeter.gate.compare import compare
-from ragmeter.gate.config import GateConfig, GateConfigError, MetricRule, load_gate_config
+from ragmeter.gate.config import GateConfigError, diff_config, load_gate_config
 from ragmeter.gate.render import render_gate
 from ragmeter.judge.client import DbJudgeCache, JudgeClient, JudgeError
 from ragmeter.loaders import get_or_create_run, load_golden, load_traces
 from ragmeter.metrics.cost import fetch_prices
-from ragmeter.metrics.retrieval import metric_names
 from ragmeter.report import render_summary, summarize_run
 from ragmeter.runner import evaluate_run
 
@@ -187,15 +186,8 @@ def compare_runs(
 
     # Every metric present in either run, with limits wide enough never to fail:
     # compare reports, gate decides.
-    names = sorted(set(base.all_values) | set(cand.all_values))
-    paired = set(metric_names(k)) | {"faithfulness", "answer_relevance"}
-    rules = tuple(
-        MetricRule(name, max_drop=float("inf")) if name in paired
-        else MetricRule(name, max_increase_pct=float("inf"))
-        for name in names
-    )
-    result = compare(base, cand, GateConfig(metrics=rules, min_samples=0,
-                                            fail_on_missing=False))
+    names = set(base.all_values) | set(cand.all_values)
+    result = compare(base, cand, diff_config(names, k))
     typer.echo(render_gate(result, run, baseline, k))
 
 
@@ -308,6 +300,22 @@ def calibration(
             f"Most of that agreement is chance, because the labels are lopsided. "
             f"Quote the kappa."
         )
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+    reload: bool = typer.Option(False, "--reload"),
+) -> None:
+    """Run the HTTP API."""
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo('error: the API extra is not installed; run: pip install -e ".[api]"',
+                   err=True)
+        raise typer.Exit(2)
+    uvicorn.run("ragmeter.api:app", host=host, port=port, reload=reload)
 
 
 if __name__ == "__main__":

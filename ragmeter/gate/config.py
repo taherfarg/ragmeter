@@ -11,7 +11,8 @@ import yaml
 
 VALID_STATS = ("mean", "p50", "p95")
 
-__all__ = ["GateConfigError", "MetricRule", "GateConfig", "load_gate_config"]
+__all__ = ["GateConfigError", "MetricRule", "GateConfig", "load_gate_config",
+           "diff_config"]
 
 
 class GateConfigError(ValueError):
@@ -97,3 +98,20 @@ def load_gate_config(path: Path) -> GateConfig:
         min_samples=min_samples,
         fail_on_missing=bool(raw.get("fail_on_missing", True)),
     )
+
+
+def diff_config(names, k: int) -> GateConfig:
+    """A config that reports every metric and fails none of them.
+
+    Used by `ragmeter compare` and by GET /v1/compare: both show the same paired
+    diff the gate uses, without passing judgement.
+    """
+    from ragmeter.metrics.retrieval import metric_names
+
+    paired = set(metric_names(k)) | {"faithfulness", "answer_relevance"}
+    rules = tuple(
+        MetricRule(name, max_drop=float("inf")) if name in paired
+        else MetricRule(name, max_increase_pct=float("inf"))
+        for name in sorted(names)
+    )
+    return GateConfig(metrics=rules, min_samples=0, fail_on_missing=False)
